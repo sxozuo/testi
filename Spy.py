@@ -1,9 +1,10 @@
 """
     🕵️ SpyMaster
     Система слежки с автоматическим сохранением всех данных и аватарок в Избранное.
+    Оптимизировано для мгновенного детекта изменений BIO и Username.
 """
 
-__version__ = (2.4.0)
+__version__ = (2.5.0)
 
 # meta developer: @ShadowArchitect
 # scope: hikka_only
@@ -21,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 @loader.tds
 class SpyMasterMod(loader.Module):
-    """Absolute Surveillance System (Saved Messages Edition)"""
+    """Absolute Surveillance System (Aggressive Edition)"""
     
     strings = {
         "name": "SpyMaster",
@@ -60,7 +61,8 @@ class SpyMasterMod(loader.Module):
             self.cache["username"] = user.username or ""
             self.cache["first_name"] = user.first_name or ""
             self.cache["last_name"] = user.last_name or ""
-        except: pass
+        except Exception as e:
+            logger.error(f"Cache fill error: {e}")
 
     async def _check_profile(self):
         try:
@@ -70,23 +72,22 @@ class SpyMasterMod(loader.Module):
 
             new_bio = full_user.full_user.about or ""
             if new_bio != self.cache.get("bio"):
-                await self._client.send_message("me", self.strings("bio_upd").format(tid, self.cache.get("bio"), new_bio))
+                await self._client.send_message("me", self.strings("bio_upd").format(tid, self.cache.get("bio") or "Пусто", new_bio or "Пусто"))
                 self.cache["bio"] = new_bio
 
             if user.username != self.cache.get("username"):
-                await self._client.send_message("me", self.strings("user_upd").format(tid, self.cache.get("username"), user.username))
+                await self._client.send_message("me", self.strings("user_upd").format(tid, self.cache.get("username") or "None", user.username or "None"))
                 self.cache["username"] = user.username
 
             if user.first_name != self.cache.get("first_name") or user.last_name != self.cache.get("last_name"):
-                old_name = f"{self.cache.get('first_name')} {self.cache.get('last_name')}"
-                new_name = f"{user.first_name} {user.last_name}"
+                old_name = f"{self.cache.get('first_name', '')} {self.cache.get('last_name', '')}".strip()
+                new_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
                 await self._client.send_message("me", self.strings("name_upd").format(tid, old_name, new_name))
                 self.cache["first_name"] = user.first_name
                 self.cache["last_name"] = user.last_name
 
             photos = await self._client(GetUserPhotosRequest(user_id=tid, offset=0, max_id=0, limit=1))
             current_pfp_id = photos.photos[0].id if photos.photos else 0
-            
             if current_pfp_id != self.cache.get("last_pfp_id"):
                 if current_pfp_id != 0:
                     await self._client.send_message("me", self.strings("ava_new").format(tid))
@@ -94,18 +95,19 @@ class SpyMasterMod(loader.Module):
                 else:
                     await self._client.send_message("me", self.strings("ava_del").format(tid))
                 self.cache["last_pfp_id"] = current_pfp_id
-                self.cache["pfp_count"] = photos.count
-        except: pass
+        except Exception as e:
+            logger.error(f"Profile check error: {e}")
 
     @loader.command(ru_doc="Захват цели")
     async def spycmd(self, message: Message):
         args = utils.get_args_raw(message)
+        if not args: return await utils.answer(message, "❌ Укажи цель")
         entity = await self._client.get_entity(args)
         self.config["target_id"] = entity.id
         await self._fill_cache()
         await utils.answer(message, self.strings("target_set").format(entity.id))
 
-    @loader.loop(interval=60)
+    @loader.loop(interval=30)
     async def profile_loop(self):
         if self.config["enabled"] and self.config["target_id"]:
             await self._check_profile()
@@ -132,4 +134,5 @@ class SpyMasterMod(loader.Module):
     @loader.command(ru_doc="Вкл/Выкл")
     async def spyoncmd(self, message: Message):
         self.config["enabled"] = not self.config["enabled"]
+        if self.config["enabled"]: await self._fill_cache()
         await utils.answer(message, self.strings("status").format("АКТИВНА" if self.config["enabled"] else "ВЫКЛ", self.config["target_id"]))
